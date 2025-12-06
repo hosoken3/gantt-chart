@@ -8,6 +8,36 @@
 	font-weight: 500;
 }
 
+/* Full page mode */
+.gantt-chart-fullpage {
+	margin: 0 !important;
+	border-radius: 0 !important;
+	min-height: calc(100vh - 100px);
+}
+
+/* Today column highlighting */
+.gantt-today {
+	background: linear-gradient(180deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.05) 100%) !important;
+	border-left: 2px solid rgb(59, 130, 246) !important;
+	border-right: 2px solid rgb(59, 130, 246) !important;
+	position: relative;
+}
+
+.gantt-today::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 3px;
+	background: rgb(59, 130, 246);
+}
+
+.gantt-date-header.gantt-today {
+	color: rgb(59, 130, 246);
+	font-weight: 700;
+}
+
 .gantt-chart-container {
 	overflow-x: auto;
 	overflow-y: visible;

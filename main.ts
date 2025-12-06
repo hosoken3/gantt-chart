@@ -1,4 +1,4 @@
-import { Plugin, MarkdownPostProcessorContext } from 'obsidian';
+import { Plugin, MarkdownView } from 'obsidian';
 
 interface GanttTask {
 	name: string;
@@ -10,14 +10,49 @@ export default class GanttChartPlugin extends Plugin {
 	async onload() {
 		console.log('Loading Gantt Chart Plugin');
 
-		// Register markdown code block processor for 'gantt'
-		this.registerMarkdownCodeBlockProcessor('gantt', (source, el, ctx) => {
-			this.renderGanttChart(source, el, ctx);
+		// Register markdown post processor to detect gantt frontmatter
+		this.registerMarkdownPostProcessor((el, ctx) => {
+			const info = ctx.getSectionInfo(el);
+			if (!info) return;
+
+			// Get the file
+			const abstractFile = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
+			if (!abstractFile) return;
+
+			// Check if it's actually a file (not a folder)
+			if (!('extension' in abstractFile)) return;
+			const file = abstractFile as any; // TFile type
+
+			// Read the file to check frontmatter
+			this.app.vault.read(file).then((content) => {
+				// Check if frontmatter has gantt: true
+				const frontmatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
+				if (!frontmatterMatch) return;
+
+				const frontmatter = frontmatterMatch[1];
+				if (!frontmatter.includes('gantt: true') && !frontmatter.includes('gantt:true')) return;
+
+				// Extract content after frontmatter
+				const ganttContent = content.replace(/^---\s*\n[\s\S]*?\n---\s*\n/, '').trim();
+
+				// Clear the element and render gantt chart
+				el.empty();
+				this.renderGanttChart(ganttContent, el, ctx);
+			});
 		});
 	}
 
 	onunload() {
 		console.log('Unloading Gantt Chart Plugin');
+	}
+
+	/**
+	 * Get today's date at midnight
+	 */
+	getToday(): Date {
+		const today = new Date();
+		today.setHours(0, 0, 0, 0);
+		return today;
 	}
 
 	/**
@@ -28,6 +63,7 @@ export default class GanttChartPlugin extends Plugin {
 	parseGanttData(source: string): GanttTask[] {
 		const tasks: GanttTask[] = [];
 		const lines = source.trim().split('\n');
+		const today = this.getToday();
 
 		for (const line of lines) {
 			const trimmedLine = line.trim();
@@ -43,7 +79,10 @@ export default class GanttChartPlugin extends Plugin {
 			const endDate = this.parseDate(endDateStr);
 
 			if (startDate && endDate) {
-				tasks.push({ name, startDate, endDate });
+				// Only include tasks that end today or in the future
+				if (endDate >= today) {
+					tasks.push({ name, startDate, endDate });
+				}
 			}
 		}
 
@@ -63,7 +102,9 @@ export default class GanttChartPlugin extends Plugin {
 			const year = parseInt(match[1]);
 			const month = parseInt(match[2]) - 1; // JS months are 0-indexed
 			const day = parseInt(match[3]);
-			return new Date(year, month, day);
+			const date = new Date(year, month, day);
+			date.setHours(0, 0, 0, 0);
+			return date;
 		}
 
 		return null;
@@ -71,23 +112,25 @@ export default class GanttChartPlugin extends Plugin {
 
 	/**
 	 * Calculate the date range for the gantt chart
+	 * Always starts from today
 	 */
 	calculateDateRange(tasks: GanttTask[]): { startDate: Date; endDate: Date } {
+		const today = this.getToday();
+
 		if (tasks.length === 0) {
-			const today = new Date();
 			return { startDate: today, endDate: today };
 		}
 
-		let minDate = tasks[0].startDate;
-		let maxDate = tasks[0].endDate;
+		// Start from today
+		const startDate = new Date(today);
 
+		// Find the maximum end date
+		let maxDate = tasks[0].endDate;
 		for (const task of tasks) {
-			if (task.startDate < minDate) minDate = task.startDate;
 			if (task.endDate > maxDate) maxDate = task.endDate;
 		}
 
-		// Add some padding (start from beginning of month, end at end of month)
-		const startDate = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+		// End at the end of the month of the last task
 		const endDate = new Date(maxDate.getFullYear(), maxDate.getMonth() + 1, 0);
 
 		return { startDate, endDate };
@@ -111,7 +154,7 @@ export default class GanttChartPlugin extends Plugin {
 	/**
 	 * Render the gantt chart
 	 */
-	renderGanttChart(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
+	renderGanttChart(source: string, el: HTMLElement, ctx: any) {
 		const tasks = this.parseGanttData(source);
 
 		if (tasks.length === 0) {
@@ -126,7 +169,7 @@ export default class GanttChartPlugin extends Plugin {
 		const dates = this.generateDateArray(startDate, endDate);
 
 		// Create container
-		const container = el.createEl('div', { cls: 'gantt-chart-container' });
+		const container = el.createEl('div', { cls: 'gantt-chart-container gantt-chart-fullpage' });
 
 		// Create table
 		const table = container.createEl('table', { cls: 'gantt-chart-table' });
@@ -155,8 +198,9 @@ export default class GanttChartPlugin extends Plugin {
 		for (let i = 0; i < dates.length; i++) {
 			const date = dates[i];
 			const month = date.getMonth();
+			const year = date.getFullYear();
 
-			if (month !== currentMonth) {
+			if (month !== currentMonth || (i > 0 && dates[i-1].getFullYear() !== year)) {
 				if (monthCell) {
 					monthCell.setAttribute('colspan', monthColspan.toString());
 				}
@@ -165,7 +209,7 @@ export default class GanttChartPlugin extends Plugin {
 				monthColspan = 1;
 				monthCell = monthRow.createEl('th', {
 					cls: 'gantt-month-header',
-					text: `${date.getFullYear()}/${String(month + 1).padStart(2, '0')}`
+					text: `${year}/${String(month + 1).padStart(2, '0')}`
 				});
 			} else {
 				monthColspan++;
@@ -181,13 +225,16 @@ export default class GanttChartPlugin extends Plugin {
 		const dateRow = thead.createEl('tr', { cls: 'gantt-date-row' });
 		dateRow.createEl('th', { cls: 'gantt-task-header-date' }); // Empty cell for task column
 
+		const today = this.getToday();
+
 		for (const date of dates) {
 			const day = date.getDate();
 			const dayOfWeek = date.getDay();
 			const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+			const isToday = date.getTime() === today.getTime();
 
 			dateRow.createEl('th', {
-				cls: `gantt-date-header ${isWeekend ? 'gantt-weekend' : ''}`,
+				cls: `gantt-date-header ${isWeekend ? 'gantt-weekend' : ''} ${isToday ? 'gantt-today' : ''}`,
 				text: day.toString()
 			});
 		}
@@ -198,6 +245,7 @@ export default class GanttChartPlugin extends Plugin {
 	 */
 	renderTaskRows(table: HTMLTableElement, tasks: GanttTask[], dates: Date[], chartStartDate: Date) {
 		const tbody = table.createEl('tbody');
+		const today = this.getToday();
 
 		for (const task of tasks) {
 			const row = tbody.createEl('tr', { cls: 'gantt-task-row' });
@@ -211,15 +259,16 @@ export default class GanttChartPlugin extends Plugin {
 				const dayOfWeek = date.getDay();
 				const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 				const isMonthBoundary = date.getDate() === 1 && i > 0;
+				const isToday = date.getTime() === today.getTime();
 
 				const cell = row.createEl('td', {
-					cls: `gantt-date-cell ${isWeekend ? 'gantt-weekend' : ''} ${isMonthBoundary ? 'gantt-month-boundary' : ''}`
+					cls: `gantt-date-cell ${isWeekend ? 'gantt-weekend' : ''} ${isMonthBoundary ? 'gantt-month-boundary' : ''} ${isToday ? 'gantt-today' : ''}`
 				});
 
 				// Check if this date is within the task's date range
 				const dateTime = date.getTime();
-				const taskStartTime = new Date(task.startDate.getFullYear(), task.startDate.getMonth(), task.startDate.getDate()).getTime();
-				const taskEndTime = new Date(task.endDate.getFullYear(), task.endDate.getMonth(), task.endDate.getDate()).getTime();
+				const taskStartTime = task.startDate.getTime();
+				const taskEndTime = task.endDate.getTime();
 
 				if (dateTime >= taskStartTime && dateTime <= taskEndTime) {
 					const isFirstDay = dateTime === taskStartTime;
