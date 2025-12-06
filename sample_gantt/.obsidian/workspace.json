@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "ガントチャート サンプル.md",
+                "file": "テスト用.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "ガントチャート サンプル"
+              "title": "テスト用"
             }
           }
         ]
@@ -94,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "ガントチャート サンプル.md",
+                "file": "テスト用.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "ガントチャート サンプルへのバックリンク"
+              "title": "テスト用へのバックリンク"
             }
           },
           {
@@ -156,24 +156,35 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "ガントチャート サンプル.md",
+                "file": "テスト用.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "ガントチャート サンプルのアウトライン"
+              "title": "テスト用のアウトライン"
+            }
+          },
+          {
+            "id": "625a82ffe243690d",
+            "type": "leaf",
+            "state": {
+              "type": "gantt-chart-view",
+              "state": {},
+              "icon": "calendar-glyph",
+              "title": "ガントチャート"
             }
           }
         ],
-        "currentTab": 4
+        "currentTab": 5
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 784.5
   },
   "left-ribbon": {
     "hiddenItems": {
+      "gantt-chart:ガントチャート": false,
       "switcher:クイックスイッチャーを開く": false,
       "graph:グラフビューを開く": false,
       "canvas:新規キャンバスを作成": false,
@@ -183,10 +194,11 @@
       "bases:Create new base": false
     }
   },
-  "active": "8e7d54d95e1b5cb0",
+  "active": "4269dd34f7ddcf96",
   "lastOpenFiles": [
-    "Welcome.md",
+    "ガントチャート サンプル.md",
     "テスト用.md",
-    "ガントチャート サンプル.md"
+    "無題のファイル.base",
+    "Welcome.md"
   ]
 }

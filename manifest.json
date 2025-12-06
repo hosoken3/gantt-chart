@@ -1,0 +1,10 @@
+{
+  "id": "gantt-chart",
+  "name": "Gantt Chart",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Display beautiful Gantt charts with task names, start dates, and end dates. Perfect for project management and planning.",
+  "author": "Your Name",
+  "authorUrl": "https://github.com/yourusername",
+  "isDesktopOnly": false
+}

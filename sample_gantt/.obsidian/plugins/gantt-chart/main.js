@@ -27,74 +27,238 @@ __export(main_exports, {
   default: () => GanttChartPlugin
 });
 module.exports = __toCommonJS(main_exports);
+var import_obsidian2 = require("obsidian");
+
+// GanttChartView.ts
 var import_obsidian = require("obsidian");
-var GanttChartPlugin = class extends import_obsidian.Plugin {
-  async onload() {
-    console.log("Loading Gantt Chart Plugin");
-    this.registerMarkdownPostProcessor((el, ctx) => {
-      const info = ctx.getSectionInfo(el);
-      if (!info)
-        return;
-      const abstractFile = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
-      if (!abstractFile)
-        return;
-      if (!("extension" in abstractFile))
-        return;
-      const file = abstractFile;
-      this.app.vault.read(file).then((content) => {
-        const frontmatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-        if (!frontmatterMatch)
-          return;
-        const frontmatter = frontmatterMatch[1];
-        if (!frontmatter.includes("gantt: true") && !frontmatter.includes("gantt:true"))
-          return;
-        const ganttContent = content.replace(/^---\s*\n[\s\S]*?\n---\s*\n/, "").trim();
-        el.empty();
-        this.renderGanttChart(ganttContent, el, ctx);
+var VIEW_TYPE_GANTT = "gantt-chart-view";
+var GanttChartView = class extends import_obsidian.ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+  }
+  getViewType() {
+    return VIEW_TYPE_GANTT;
+  }
+  getDisplayText() {
+    return "\u30AC\u30F3\u30C8\u30C1\u30E3\u30FC\u30C8";
+  }
+  getIcon() {
+    return "calendar-glyph";
+  }
+  async onOpen() {
+    const container = this.containerEl.children[1];
+    container.empty();
+    container.addClass("gantt-view-container");
+    this.createHeader(container);
+    this.createAddTaskButton(container);
+    this.createGanttTable(container);
+  }
+  createHeader(container) {
+    const header = container.createDiv({ cls: "gantt-header" });
+    header.createEl("h4", { text: "\u30AC\u30F3\u30C8\u30C1\u30E3\u30FC\u30C8", cls: "gantt-title" });
+  }
+  createAddTaskButton(container) {
+    const buttonContainer = container.createDiv({ cls: "gantt-button-container" });
+    const button = buttonContainer.createEl("button", {
+      text: "+ \u65B0\u3057\u3044\u30BF\u30B9\u30AF",
+      cls: "add-task-button"
+    });
+    button.addEventListener("click", () => {
+      const today = new Date();
+      const todayStr = this.formatDate(today);
+      const nextWeek = new Date(today);
+      nextWeek.setDate(nextWeek.getDate() + 7);
+      const nextWeekStr = this.formatDate(nextWeek);
+      this.plugin.settings.tasks.push({
+        name: "\u65B0\u3057\u3044\u30BF\u30B9\u30AF",
+        startDate: todayStr,
+        endDate: nextWeekStr
       });
+      this.plugin.saveSettings();
+      this.refresh();
     });
   }
-  onunload() {
-    console.log("Unloading Gantt Chart Plugin");
+  createGanttTable(container) {
+    const wrapper = container.createDiv({ cls: "gantt-table-wrapper" });
+    const table = wrapper.createEl("table", { cls: "gantt-table" });
+    const thead = table.createEl("thead");
+    const headerRow = thead.createEl("tr");
+    headerRow.createEl("th", { text: "\u30BF\u30B9\u30AF\u540D", cls: "gantt-fixed-column" });
+    headerRow.createEl("th", { text: "\u958B\u59CB\u65E5", cls: "gantt-fixed-column gantt-date-header" });
+    headerRow.createEl("th", { text: "\u7D42\u4E86\u65E5", cls: "gantt-fixed-column gantt-date-header" });
+    headerRow.createEl("th", { text: "\u64CD\u4F5C", cls: "gantt-fixed-column gantt-action-header" });
+    this.addCalendarHeaders(headerRow);
+    const tbody = table.createEl("tbody");
+    for (const task of this.plugin.settings.tasks) {
+      this.createTaskRow(tbody, task);
+    }
   }
-  /**
-   * Get today's date at midnight
-   */
+  addCalendarHeaders(headerRow) {
+    var _a;
+    const { startDate, endDate } = this.calculateDateRange();
+    const dates = this.generateDateArray(startDate, endDate);
+    const monthRow = (_a = headerRow.parentElement) == null ? void 0 : _a.createEl("tr", { cls: "gantt-month-row" });
+    if (monthRow) {
+      monthRow.createEl("th", { cls: "gantt-fixed-column" });
+      monthRow.createEl("th", { cls: "gantt-fixed-column" });
+      monthRow.createEl("th", { cls: "gantt-fixed-column" });
+      monthRow.createEl("th", { cls: "gantt-fixed-column" });
+      let currentMonth = -1;
+      let monthColspan = 0;
+      let monthCell = null;
+      for (let i = 0; i < dates.length; i++) {
+        const date = dates[i];
+        const month = date.getMonth();
+        const year = date.getFullYear();
+        if (month !== currentMonth || i > 0 && dates[i - 1].getFullYear() !== year) {
+          if (monthCell) {
+            monthCell.setAttribute("colspan", monthColspan.toString());
+          }
+          currentMonth = month;
+          monthColspan = 1;
+          monthCell = monthRow.createEl("th", {
+            cls: "gantt-month-header",
+            text: `${year}/${String(month + 1).padStart(2, "0")}`
+          });
+        } else {
+          monthColspan++;
+        }
+      }
+      if (monthCell) {
+        monthCell.setAttribute("colspan", monthColspan.toString());
+      }
+    }
+    headerRow.createEl("th", { cls: "gantt-spacer" });
+    const today = this.getToday();
+    for (const date of dates) {
+      const day = date.getDate();
+      const dayOfWeek = date.getDay();
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+      const isToday = date.getTime() === today.getTime();
+      headerRow.createEl("th", {
+        cls: `gantt-date-header ${isWeekend ? "gantt-weekend" : ""} ${isToday ? "gantt-today" : ""}`,
+        text: day.toString()
+      });
+    }
+  }
+  createTaskRow(tbody, task) {
+    const row = tbody.createEl("tr", { cls: "gantt-task-row" });
+    const nameCell = row.createEl("td", { cls: "gantt-editable gantt-fixed-column" });
+    nameCell.contentEditable = "true";
+    nameCell.textContent = task.name;
+    nameCell.addEventListener("blur", () => {
+      task.name = nameCell.textContent || "";
+      this.plugin.saveSettings();
+    });
+    nameCell.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        nameCell.blur();
+      }
+    });
+    const startCell = row.createEl("td", { cls: "gantt-editable gantt-date-cell gantt-fixed-column" });
+    startCell.contentEditable = "true";
+    startCell.textContent = task.startDate;
+    startCell.addEventListener("blur", () => {
+      task.startDate = startCell.textContent || "";
+      this.plugin.saveSettings();
+      this.refresh();
+    });
+    startCell.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        startCell.blur();
+      }
+    });
+    const endCell = row.createEl("td", { cls: "gantt-editable gantt-date-cell gantt-fixed-column" });
+    endCell.contentEditable = "true";
+    endCell.textContent = task.endDate;
+    endCell.addEventListener("blur", () => {
+      task.endDate = endCell.textContent || "";
+      this.plugin.saveSettings();
+      this.refresh();
+    });
+    endCell.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        endCell.blur();
+      }
+    });
+    const actionCell = row.createEl("td", { cls: "gantt-action-cell gantt-fixed-column" });
+    const deleteBtn = actionCell.createEl("button", {
+      text: "\u2715",
+      cls: "delete-task-button"
+    });
+    deleteBtn.addEventListener("click", () => {
+      const index = this.plugin.settings.tasks.indexOf(task);
+      if (index > -1) {
+        this.plugin.settings.tasks.splice(index, 1);
+        this.plugin.saveSettings();
+        this.refresh();
+      }
+    });
+    this.addGanttCells(row, task);
+  }
+  addGanttCells(row, task) {
+    const { startDate, endDate } = this.calculateDateRange();
+    const dates = this.generateDateArray(startDate, endDate);
+    const today = this.getToday();
+    const taskStart = this.parseDate(task.startDate);
+    const taskEnd = this.parseDate(task.endDate);
+    if (!taskStart || !taskEnd)
+      return;
+    for (let i = 0; i < dates.length; i++) {
+      const date = dates[i];
+      const dayOfWeek = date.getDay();
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+      const isMonthBoundary = date.getDate() === 1 && i > 0;
+      const isToday = date.getTime() === today.getTime();
+      const cell = row.createEl("td", {
+        cls: `gantt-date-cell ${isWeekend ? "gantt-weekend" : ""} ${isMonthBoundary ? "gantt-month-boundary" : ""} ${isToday ? "gantt-today" : ""}`
+      });
+      const dateTime = date.getTime();
+      const taskStartTime = taskStart.getTime();
+      const taskEndTime = taskEnd.getTime();
+      if (dateTime >= taskStartTime && dateTime <= taskEndTime) {
+        const isFirstDay = dateTime === taskStartTime;
+        const isLastDay = dateTime === taskEndTime;
+        cell.createEl("div", {
+          cls: `gantt-bar ${isFirstDay ? "gantt-bar-start" : ""} ${isLastDay ? "gantt-bar-end" : ""}`
+        });
+      }
+    }
+  }
+  calculateDateRange() {
+    const today = this.getToday();
+    if (this.plugin.settings.tasks.length === 0) {
+      return { startDate: today, endDate: today };
+    }
+    const startDate = new Date(today);
+    let maxDate = today;
+    for (const task of this.plugin.settings.tasks) {
+      const taskEnd = this.parseDate(task.endDate);
+      if (taskEnd && taskEnd >= today && taskEnd > maxDate) {
+        maxDate = taskEnd;
+      }
+    }
+    const endDate = new Date(maxDate.getFullYear(), maxDate.getMonth() + 1, 0);
+    return { startDate, endDate };
+  }
+  generateDateArray(startDate, endDate) {
+    const dates = [];
+    const current = new Date(startDate);
+    while (current <= endDate) {
+      dates.push(new Date(current));
+      current.setDate(current.getDate() + 1);
+    }
+    return dates;
+  }
   getToday() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return today;
   }
-  /**
-   * Parse gantt data from source text
-   * Format: タスク名 | 開始日 | 終了日
-   * Date format: YYYY/MM/DD or YYYY-MM-DD
-   */
-  parseGanttData(source) {
-    const tasks = [];
-    const lines = source.trim().split("\n");
-    const today = this.getToday();
-    for (const line of lines) {
-      const trimmedLine = line.trim();
-      if (!trimmedLine || trimmedLine.startsWith("#"))
-        continue;
-      const parts = trimmedLine.split("|").map((p) => p.trim());
-      if (parts.length !== 3)
-        continue;
-      const [name, startDateStr, endDateStr] = parts;
-      const startDate = this.parseDate(startDateStr);
-      const endDate = this.parseDate(endDateStr);
-      if (startDate && endDate) {
-        if (endDate >= today) {
-          tasks.push({ name, startDate, endDate });
-        }
-      }
-    }
-    return tasks;
-  }
-  /**
-   * Parse date string in various formats
-   */
   parseDate(dateStr) {
     dateStr = dateStr.trim();
     const match = dateStr.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
@@ -108,129 +272,83 @@ var GanttChartPlugin = class extends import_obsidian.Plugin {
     }
     return null;
   }
-  /**
-   * Calculate the date range for the gantt chart
-   * Always starts from today
-   */
-  calculateDateRange(tasks) {
-    const today = this.getToday();
-    if (tasks.length === 0) {
-      return { startDate: today, endDate: today };
-    }
-    const startDate = new Date(today);
-    let maxDate = tasks[0].endDate;
-    for (const task of tasks) {
-      if (task.endDate > maxDate)
-        maxDate = task.endDate;
-    }
-    const endDate = new Date(maxDate.getFullYear(), maxDate.getMonth() + 1, 0);
-    return { startDate, endDate };
+  formatDate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}/${month}/${day}`;
   }
-  /**
-   * Generate array of dates between start and end
-   */
-  generateDateArray(startDate, endDate) {
-    const dates = [];
-    const current = new Date(startDate);
-    while (current <= endDate) {
-      dates.push(new Date(current));
-      current.setDate(current.getDate() + 1);
-    }
-    return dates;
+  refresh() {
+    this.onOpen();
   }
-  /**
-   * Render the gantt chart
-   */
-  renderGanttChart(source, el, ctx) {
-    const tasks = this.parseGanttData(source);
-    if (tasks.length === 0) {
-      el.createEl("div", {
-        text: "\u30AC\u30F3\u30C8\u30C1\u30E3\u30FC\u30C8\u306B\u30BF\u30B9\u30AF\u304C\u3042\u308A\u307E\u305B\u3093\u3002\u5F62\u5F0F: \u30BF\u30B9\u30AF\u540D | \u958B\u59CB\u65E5 | \u7D42\u4E86\u65E5",
-        cls: "gantt-error"
-      });
-      return;
-    }
-    const { startDate, endDate } = this.calculateDateRange(tasks);
-    const dates = this.generateDateArray(startDate, endDate);
-    const container = el.createEl("div", { cls: "gantt-chart-container gantt-chart-fullpage" });
-    const table = container.createEl("table", { cls: "gantt-chart-table" });
-    this.renderHeader(table, dates);
-    this.renderTaskRows(table, tasks, dates, startDate);
+  async onClose() {
   }
-  /**
-   * Render calendar header
-   */
-  renderHeader(table, dates) {
-    const thead = table.createEl("thead");
-    const monthRow = thead.createEl("tr", { cls: "gantt-month-row" });
-    monthRow.createEl("th", { cls: "gantt-task-header", text: "\u30BF\u30B9\u30AF" });
-    let currentMonth = -1;
-    let monthColspan = 0;
-    let monthCell = null;
-    for (let i = 0; i < dates.length; i++) {
-      const date = dates[i];
-      const month = date.getMonth();
-      const year = date.getFullYear();
-      if (month !== currentMonth || i > 0 && dates[i - 1].getFullYear() !== year) {
-        if (monthCell) {
-          monthCell.setAttribute("colspan", monthColspan.toString());
-        }
-        currentMonth = month;
-        monthColspan = 1;
-        monthCell = monthRow.createEl("th", {
-          cls: "gantt-month-header",
-          text: `${year}/${String(month + 1).padStart(2, "0")}`
+};
+
+// main.ts
+var DEFAULT_SETTINGS = {
+  tasks: [
+    {
+      name: "\u30BF\u30B9\u30AF1",
+      startDate: "2025/12/07",
+      endDate: "2025/12/10"
+    },
+    {
+      name: "\u30BF\u30B9\u30AF2",
+      startDate: "2025/12/09",
+      endDate: "2025/12/15"
+    },
+    {
+      name: "\u30BF\u30B9\u30AF3",
+      startDate: "2025/12/13",
+      endDate: "2025/12/20"
+    }
+  ]
+};
+var GanttChartPlugin = class extends import_obsidian2.Plugin {
+  async onload() {
+    await this.loadSettings();
+    this.registerView(
+      VIEW_TYPE_GANTT,
+      (leaf) => new GanttChartView(leaf, this)
+    );
+    this.addRibbonIcon("calendar-glyph", "\u30AC\u30F3\u30C8\u30C1\u30E3\u30FC\u30C8", () => {
+      this.activateView();
+    });
+    this.addCommand({
+      id: "open-gantt-chart",
+      name: "\u30AC\u30F3\u30C8\u30C1\u30E3\u30FC\u30C8\u3092\u958B\u304F",
+      callback: () => {
+        this.activateView();
+      }
+    });
+  }
+  async activateView() {
+    const { workspace } = this.app;
+    let leaf = null;
+    const leaves = workspace.getLeavesOfType(VIEW_TYPE_GANTT);
+    if (leaves.length > 0) {
+      leaf = leaves[0];
+    } else {
+      const rightLeaf = workspace.getRightLeaf(false);
+      if (rightLeaf) {
+        leaf = rightLeaf;
+        await leaf.setViewState({
+          type: VIEW_TYPE_GANTT,
+          active: true
         });
-      } else {
-        monthColspan++;
       }
     }
-    if (monthCell) {
-      monthCell.setAttribute("colspan", monthColspan.toString());
-    }
-    const dateRow = thead.createEl("tr", { cls: "gantt-date-row" });
-    dateRow.createEl("th", { cls: "gantt-task-header-date" });
-    const today = this.getToday();
-    for (const date of dates) {
-      const day = date.getDate();
-      const dayOfWeek = date.getDay();
-      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-      const isToday = date.getTime() === today.getTime();
-      dateRow.createEl("th", {
-        cls: `gantt-date-header ${isWeekend ? "gantt-weekend" : ""} ${isToday ? "gantt-today" : ""}`,
-        text: day.toString()
-      });
+    if (leaf) {
+      workspace.revealLeaf(leaf);
     }
   }
-  /**
-   * Render task rows with gantt bars
-   */
-  renderTaskRows(table, tasks, dates, chartStartDate) {
-    const tbody = table.createEl("tbody");
-    const today = this.getToday();
-    for (const task of tasks) {
-      const row = tbody.createEl("tr", { cls: "gantt-task-row" });
-      row.createEl("td", { cls: "gantt-task-name", text: task.name });
-      for (let i = 0; i < dates.length; i++) {
-        const date = dates[i];
-        const dayOfWeek = date.getDay();
-        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-        const isMonthBoundary = date.getDate() === 1 && i > 0;
-        const isToday = date.getTime() === today.getTime();
-        const cell = row.createEl("td", {
-          cls: `gantt-date-cell ${isWeekend ? "gantt-weekend" : ""} ${isMonthBoundary ? "gantt-month-boundary" : ""} ${isToday ? "gantt-today" : ""}`
-        });
-        const dateTime = date.getTime();
-        const taskStartTime = task.startDate.getTime();
-        const taskEndTime = task.endDate.getTime();
-        if (dateTime >= taskStartTime && dateTime <= taskEndTime) {
-          const isFirstDay = dateTime === taskStartTime;
-          const isLastDay = dateTime === taskEndTime;
-          cell.createEl("div", {
-            cls: `gantt-bar ${isFirstDay ? "gantt-bar-start" : ""} ${isLastDay ? "gantt-bar-end" : ""}`
-          });
-        }
-      }
-    }
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
+  onunload() {
   }
 };
